@@ -1,1 +1,1 @@
-{ "functions": { "api/probe.js": { "maxDuration": 30 } } }
+{ "functions": { "api/probe.js": { "maxDuration": 20 } } }
