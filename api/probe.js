@@ -3,12 +3,27 @@
 // syd1 Sydney, gru1 São Paulo, bom1 Mumbai, hnd1 Tokyo, iad1 Washington, sfo1 San Francisco, cdg1 Paris, dub1 Dublin.
 // Environment variable: TOKEN = the API token from WordPress → Awwurl → Dashboard.
 // Then add to WordPress → Awwurl → Settings → General → Check locations:  Frankfurt|https://<project>.vercel.app/api/probe
+import tls from 'node:tls';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 AwwurlBot/1.0';
+const BUDGET = 8000;   // per host, so the whole batch answers well inside the site's wait
+
+// Does a web server accept a TLS connection? Sites behind Akamai and similar accept the connection from cloud addresses
+// and then never answer; that is bot filtering, not an outage.
+function tlsAlive(host) {
+  return new Promise((resolve) => {
+    let done = false; const fin = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      const s = tls.connect({ host, port: 443, servername: host, rejectUnauthorized: false, timeout: 3000 }, () => { fin(true); s.destroy(); });
+      s.on('timeout', () => { fin(false); s.destroy(); }); s.on('error', () => fin(false));
+    } catch (e) { fin(false); }
+  });
+}
 
 async function checkHost(host) {
   const t0 = Date.now();
   const tryUrl = async (u) => {
-    const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 9000);
+    const left = BUDGET - (Date.now() - t0); if (left < 1500) { throw new Error('Timed out'); }
+    const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), Math.min(6000, left));
     try { const r = await fetch(u, { redirect: 'follow', signal: ctl.signal, headers: { 'user-agent': UA, 'accept': 'text/html,*/*;q=0.8' } }); clearTimeout(timer); return r; }
     catch (e) { clearTimeout(timer); throw e; }
   };
@@ -21,7 +36,9 @@ async function checkHost(host) {
     } catch (e) { lastErr = e; }
   }
   const msg = String(lastErr && lastErr.message ? lastErr.message : lastErr).slice(0, 150);
-  return { host, ok: 0, code: null, ms: Date.now() - t0, layer: /abort/i.test(msg) ? 'http' : 'http', error: /abort/i.test(msg) ? 'Timed out' : msg };
+  const timedOut = /abort|timed out/i.test(msg);
+  if (timedOut && await tlsAlive(host)) { return { host, ok: 1, code: null, ms: Date.now() - t0, layer: 'blocked', error: null }; }
+  return { host, ok: 0, code: null, ms: Date.now() - t0, layer: 'http', error: timedOut ? 'Timed out' : msg };
 }
 
 export default async function handler(req, res) {
@@ -30,7 +47,7 @@ export default async function handler(req, res) {
   let body = req.body; if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = {}; } }
   const hosts = Array.isArray(body && body.hosts) ? body.hosts.slice(0, 60).filter((h) => /^[a-z0-9.-]+$/i.test(h)) : [];
   const results = [];
-  for (let i = 0; i < hosts.length; i += 15) { results.push(...(await Promise.all(hosts.slice(i, i + 15).map(checkHost)))); }
+  results.push(...(await Promise.all(hosts.map(checkHost))));
   res.setHeader('cache-control', 'no-store');
   res.status(200).json({ region: process.env.VERCEL_REGION || null, results });
 }
