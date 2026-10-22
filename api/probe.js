@@ -5,7 +5,7 @@
 // Then add to WordPress → Awwurl → Settings → General → Check locations:  Frankfurt|https://<project>.vercel.app/api/probe
 import tls from 'node:tls';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 AwwurlBot/1.0';
-const BUDGET = 8000;   // per host, so the whole batch answers well inside the site's wait
+const BUDGET = 6000;   // per host, so the whole batch answers well inside the site's wait
 
 // Does a web server accept a TLS connection? Sites behind Akamai and similar accept the connection from cloud addresses
 // and then never answer; that is bot filtering, not an outage.
@@ -45,7 +45,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(200).json({ probe: 'awwurl', region: process.env.VERCEL_REGION || null }); return; }
   if ((req.headers['authorization'] || '') !== 'Bearer ' + process.env.TOKEN) { res.status(403).json({ error: 'forbidden' }); return; }
   let body = req.body; if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = {}; } }
-  const hosts = Array.isArray(body && body.hosts) ? body.hosts.slice(0, 60).filter((h) => /^[a-z0-9.-]+$/i.test(h)) : [];
+  const hosts = Array.isArray(body && body.hosts) ? body.hosts.slice(0, 80).filter((h) => /^[a-z0-9.-]+$/i.test(h)) : [];
   const results = [];
   results.push(...(await Promise.all(hosts.map(checkHost))));
   res.setHeader('cache-control', 'no-store');
